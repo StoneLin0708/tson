@@ -39,17 +39,16 @@ json parse_recursive(const string &tson, std::unordered_map<string, json> &cache
     return json::parse(
         tson,
         [&](int depth, json::parse_event_t event, json &parsed) {
-            if (event == json::parse_event_t::value && parsed.is_string()) {
-                const auto val = parsed.get<string>();
-                if (val[0] == '@') {
-                    const auto pstr = val.substr(1);
-                    if (cache.find(pstr) == cache.end()) {
-                        cache[pstr] = parse_recursive(readstr(cwd / fs::path(pstr)), cache,
-                                                      ref_depth + 1, cwd);
-                    }
-                    parsed = cache[pstr];
-                }
+            if (event != json::parse_event_t::value || !parsed.is_string()) return true;
+            const auto &val = parsed.get<string>();
+            if (val[0] != '@') return true;
+            const auto &pstr = val.substr(1);
+            if (cache.find(pstr) == cache.end()) {
+                cache[pstr] =
+                    parse_recursive(readstr(cwd / fs::path(pstr)), cache, ref_depth + 1, cwd);
             }
+            parsed = cache[pstr];
+
             return true;
         },
         true, true);
@@ -57,10 +56,7 @@ json parse_recursive(const string &tson, std::unordered_map<string, json> &cache
 
 void unpack_recursive(json &parent)
 {
-    if (parent.is_array()) {
-        for (auto &e : parent)
-            if (e.is_structured()) unpack_recursive(e);
-    } else if (parent.is_object()) {
+    if (parent.is_object()) {
         while (true) {  // it might be a chained unpack
             // TODO : implement multiple, prioritized unpack
             json::iterator to_unpack = parent.find("*");
@@ -71,11 +67,12 @@ void unpack_recursive(json &parent)
 
             for (auto &i : to_add.items())  // add without override parent items
                 if (parent.find(i.key()) == parent.end()) parent[i.key()] = std::move(i.value());
-
             for (auto &e : parent)
                 if (e.is_structured()) unpack_recursive(e);
         }
     }
+    for (auto &e : parent)
+        if (e.is_structured()) unpack_recursive(e);
 }
 
 json from_text(const string &tson_str, const string &cwd = ".")
